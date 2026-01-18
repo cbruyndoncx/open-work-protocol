@@ -8,6 +8,12 @@ export default {
   transform: {
     '^.+\\.ts$': ['ts-jest', {
       useESM: true,
+      tsconfig: {
+        module: 'esnext',
+        target: 'es2022',
+        moduleResolution: 'bundler',
+        isolatedModules: true,
+      },
     }],
   },
   testMatch: ['**/__tests__/**/*.test.ts', '**/?(*.)+(spec|test).ts'],

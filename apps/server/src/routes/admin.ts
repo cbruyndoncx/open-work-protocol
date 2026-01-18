@@ -134,4 +134,79 @@ export async function adminRoutes(fastify: FastifyInstance) {
       reply.status(400).send(formatError(appError));
     }
   });
+
+  // SSE endpoint for real-time state updates
+  fastify.get('/v1/admin/state/stream', async (request, reply) => {
+    const query = request.query as { token?: string };
+    const adminToken = query.token || request.headers['x-admin-token'];
+    const expectedToken = process.env.OWP_ADMIN_TOKEN || 'dev-admin-token';
+
+    if (!adminToken || adminToken !== expectedToken) {
+      return reply.status(401).send(formatError(new Error('Invalid admin token')));
+    }
+
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no'
+    });
+
+    const getState = () => {
+      const db = getDatabase();
+
+      const workersOnline = db.prepare(`
+        SELECT COUNT(*) as count FROM workers
+        WHERE last_heartbeat > datetime('now', '-5 minutes') AND status != 'paused'
+      `).get() as any;
+
+      const tasksQueued = db.prepare(`
+        SELECT COUNT(*) as count FROM tasks WHERE status = 'ready'
+      `).get() as any;
+
+      const tasksInProgress = db.prepare(`
+        SELECT COUNT(*) as count FROM tasks WHERE status IN ('leased', 'in_progress')
+      `).get() as any;
+
+      const repositories = db.prepare(`
+        SELECT r.repo, r.max_open_prs, COUNT(t.id) as current_open_prs
+        FROM repositories r
+        LEFT JOIN tasks t ON r.id = t.repo_id AND t.status = 'pr_opened'
+        GROUP BY r.id, r.repo, r.max_open_prs
+        ORDER BY r.repo
+      `).all() as any[];
+
+      return {
+        workers_online: workersOnline.count,
+        tasks_queued: tasksQueued.count,
+        tasks_in_progress: tasksInProgress.count,
+        repositories: repositories.map((r: any) => ({
+          repo: r.repo,
+          max_open_prs: r.max_open_prs,
+          current_open_prs: r.current_open_prs
+        }))
+      };
+    };
+
+    const sendState = () => {
+      try {
+        const state = getState();
+        reply.raw.write(`data: ${JSON.stringify(state)}\n\n`);
+      } catch (error) {
+        request.log.error({ error: String(error) }, 'Error sending SSE state');
+      }
+    };
+
+    // Send initial state
+    sendState();
+
+    // Send updates every 2 seconds
+    const interval = setInterval(sendState, 2000);
+
+    // Cleanup on disconnect
+    request.raw.on('close', () => {
+      clearInterval(interval);
+      request.log.info('SSE client disconnected');
+    });
+  });
 }

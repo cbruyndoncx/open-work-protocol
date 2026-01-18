@@ -24,7 +24,7 @@ Developers with AI tools want to contribute but lack:
 ✅ **Capacity-Aware Scheduling**: Points-based system with skill matching  
 ✅ **Lease-Based Management**: TTL-based task assignment with auto-requeue  
 ✅ **Distributed Protocol**: Workers can be anywhere, no centralized control  
-✅ **Real-Time Monitoring**: Live dashboard with SSE updates  
+✅ **Real-Time Monitoring**: Live dashboard with Server-Sent Events (SSE)  
 
 ## Architecture
 
@@ -35,7 +35,7 @@ Developers with AI tools want to contribute but lack:
 │                                                             │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
 │  │   Workers    │  │   Dashboard  │  │   Obsidian   │     │
-│  │  (Anywhere)  │  │   (Web UI)   │  │   Plugin     │     │
+│  │  (Anywhere)  │  │   (Web UI)   │  │  (Planned)   │     │
 │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘     │
 │         │                 │                 │              │
 │         └─────────────────┼─────────────────┘              │
@@ -132,6 +132,35 @@ cd apps/server
 docker build -t owp-server .
 docker run -p 8787:8787 -v pool.db:/app/pool.db owp-server
 ```
+
+### Dashboard Setup
+
+```bash
+# In a separate terminal
+cd apps/web
+npm install
+npm run dev
+# Dashboard available at http://localhost:5173
+```
+
+The dashboard provides:
+- Real-time worker status monitoring via Server-Sent Events (SSE)
+- Task queue and progress tracking
+- Admin controls for creating repositories and tasks
+- System state overview
+- Automatic fallback to polling if SSE unavailable
+
+### Obsidian Plugin (Planned)
+
+The Obsidian plugin structure exists in `apps/obsidian-plugin/` but is not yet built or tested. This is planned for future development. For now, use the web dashboard for all monitoring and administration tasks.
+
+**Planned Features**:
+- Worker registration and management
+- Task viewing and status updates
+- Admin controls for repos and tasks
+- Real-time system monitoring
+
+**Current Status**: Structure only, not functional
 
 ## API Endpoints
 
