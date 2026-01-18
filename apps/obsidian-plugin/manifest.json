@@ -1,0 +1,10 @@
+{
+  "id": "owp-pool",
+  "name": "OWP Pool",
+  "version": "0.1.0",
+  "minAppVersion": "0.15.0",
+  "description": "Open Work Protocol Pool - Distributed task scheduler for open-source contributions",
+  "author": "OWP Pool",
+  "authorUrl": "https://github.com/open-work-protocol/pool",
+  "isDesktopOnly": false
+}

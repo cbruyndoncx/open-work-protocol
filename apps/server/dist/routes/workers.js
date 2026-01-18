@@ -1,77 +1,74 @@
 import { nanoid } from 'nanoid';
 import { createHash } from 'crypto';
 import { getDatabase } from '../database/connection.js';
+import { WorkerRegisterRequestSchema, WorkerHeartbeatRequestSchema } from '../validation/schemas.js';
+import { handleError, formatError } from '../errors/handler.js';
 export async function workerRoutes(fastify) {
     // Worker registration
     fastify.post('/v1/workers/register', async (request, reply) => {
-        const body = request.body;
-        const { name, github_handle, skills, capacity_points, max_concurrent_tasks } = body;
         try {
+            const validated = WorkerRegisterRequestSchema.parse(request.body);
             const db = getDatabase();
             const workerId = `w_${nanoid()}`;
             const token = nanoid(32);
             const tokenHash = createHash('sha256').update(token).digest('hex');
-            // Insert worker
             db.prepare(`
         INSERT INTO workers (
           id, name, github_handle, skills, capacity_points, 
           max_concurrent_tasks, token_hash, status
         ) VALUES (?, ?, ?, ?, ?, ?, ?, 'idle')
-      `).run(workerId, name, github_handle || null, JSON.stringify(skills || []), capacity_points || 5, max_concurrent_tasks || 2, tokenHash);
+      `).run(workerId, validated.name, validated.github_handle || null, JSON.stringify(validated.skills), validated.capacity_points, validated.max_concurrent_tasks, tokenHash);
             reply.status(201).send({
                 worker_id: workerId,
                 token: token
             });
         }
         catch (error) {
-            request.log.error({ error: String(error) }, 'Worker registration failed');
-            reply.status(500).send({
-                error: 'registration_failed',
-                message: 'Failed to register worker'
-            });
+            const appError = handleError(error);
+            request.log.error({ error: String(error) }, appError.message);
+            reply.status(400).send(formatError(appError));
         }
     });
     // Worker heartbeat
     fastify.post('/v1/workers/heartbeat', async (request, reply) => {
-        const authHeader = request.headers.authorization;
-        if (!authHeader?.startsWith('Bearer ')) {
-            return reply.status(401).send({ error: 'unauthorized', message: 'Missing bearer token' });
-        }
-        const token = authHeader.substring(7);
-        const tokenHash = createHash('sha256').update(token).digest('hex');
-        const body = request.body;
         try {
+            const authHeader = request.headers.authorization;
+            if (!authHeader?.startsWith('Bearer ')) {
+                return reply.status(401).send(formatError(new Error('Missing bearer token')));
+            }
+            const validated = WorkerHeartbeatRequestSchema.parse(request.body);
+            const token = authHeader.substring(7);
+            const tokenHash = createHash('sha256').update(token).digest('hex');
             const db = getDatabase();
-            // Find worker by token
             const worker = db.prepare('SELECT id FROM workers WHERE token_hash = ?').get(tokenHash);
             if (!worker) {
-                return reply.status(401).send({ error: 'unauthorized', message: 'Invalid token' });
+                return reply.status(401).send(formatError(new Error('Invalid token')));
             }
-            // Update heartbeat
             db.prepare(`
         UPDATE workers 
         SET status = ?, last_heartbeat = CURRENT_TIMESTAMP
         WHERE id = ?
-      `).run(body.status || 'idle', worker.id);
+      `).run(validated.status, worker.id);
             reply.send({
                 ok: true,
                 server_time: new Date().toISOString()
             });
         }
         catch (error) {
-            request.log.error({ error: String(error) }, 'Heartbeat failed');
-            reply.status(500).send({ error: 'heartbeat_failed', message: 'Failed to update heartbeat' });
+            const appError = handleError(error);
+            request.log.error({ error: String(error) }, appError.message);
+            reply.status(400).send(formatError(appError));
         }
     });
     // Fetch work
     fastify.get('/v1/work', async (request, reply) => {
-        const authHeader = request.headers.authorization;
-        if (!authHeader?.startsWith('Bearer ')) {
-            return reply.status(401).send({ error: 'unauthorized', message: 'Missing bearer token' });
-        }
-        const token = authHeader.substring(7);
-        const tokenHash = createHash('sha256').update(token).digest('hex');
         try {
+            const authHeader = request.headers.authorization;
+            if (!authHeader?.startsWith('Bearer ')) {
+                return reply.status(401).send(formatError(new Error('Missing bearer token')));
+            }
+            const token = authHeader.substring(7);
+            const tokenHash = createHash('sha256').update(token).digest('hex');
             const db = getDatabase();
             // Find worker by token
             const worker = db.prepare(`
@@ -79,7 +76,7 @@ export async function workerRoutes(fastify) {
         FROM workers WHERE token_hash = ?
       `).get(tokenHash);
             if (!worker) {
-                return reply.status(401).send({ error: 'unauthorized', message: 'Invalid token' });
+                return reply.status(401).send(formatError(new Error('Invalid token')));
             }
             // Find available tasks
             const tasks = db.prepare(`
@@ -122,8 +119,9 @@ export async function workerRoutes(fastify) {
             });
         }
         catch (error) {
-            request.log.error({ error: String(error) }, 'Work fetch failed');
-            reply.status(500).send({ error: 'work_fetch_failed', message: 'Failed to fetch work' });
+            const appError = handleError(error);
+            request.log.error({ error: String(error) }, appError.message);
+            reply.status(400).send(formatError(appError));
         }
     });
 }
