@@ -1,0 +1,41 @@
+{
+  "name": "@owp/protocol",
+  "version": "0.1.0",
+  "description": "Open Work Protocol (OWP) OpenAPI specification and generated TypeScript types",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "files": [
+    "dist/",
+    "openapi.yaml"
+  ],
+  "scripts": {
+    "generate": "node scripts/generate.js",
+    "build": "npm run generate && tsc",
+    "dev": "npm run generate && tsc --watch",
+    "clean": "rm -rf dist/ src/types.ts src/client.ts",
+    "validate": "npx @apidevtools/swagger-cli validate openapi.yaml",
+    "test": "npm run build"
+  },
+  "keywords": [
+    "openapi",
+    "typescript",
+    "api",
+    "owp",
+    "protocol"
+  ],
+  "author": "OWP Pool",
+  "license": "MIT",
+  "devDependencies": {
+    "@apidevtools/swagger-cli": "^4.0.4",
+    "@hey-api/openapi-ts": "^0.53.0",
+    "typescript": "^5.3.0",
+    "yaml": "^2.3.4"
+  },
+  "dependencies": {
+    "@hey-api/client-fetch": "^0.13.1"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "postToolUse": [
+      {
+        "matcher": "write",
+        "command": "echo 'Reminder: Run @update-devlog to maintain your development log for hackathon scoring (20% of grade)'"
+      }
+    ],
+    "stop": [
+      {
+        "command": "bash scripts/update-devlog.sh"
+      }
+    ]
+  }
+}

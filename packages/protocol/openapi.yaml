@@ -1,0 +1,1014 @@
+openapi: 3.1.0
+info:
+  title: Open Work Protocol (OWP) Pool API
+  version: 0.1.0
+  description: |
+    Open Work Protocol (OWP) Pool is a capacity-aware task scheduler and worker protocol 
+    that coordinates independent contributors using their own local AI coding tools to 
+    produce PRs for shared repositories.
+    
+    ## Key Features
+    - **BYO Seat Model**: Contributors use their own tools without sharing accounts
+    - **Capacity-Aware Scheduling**: Points-based system with concurrency limits
+    - **Maintainer Safety Controls**: Review budget throttling and area locks
+    - **Resilient Task Management**: Leases with TTL and automatic requeue
+    - **Advanced Features**: Reputation scoring, trust tiers, and analytics
+  contact:
+    name: OWP Pool API Support
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8787
+    description: Local development server
+  - url: https://api.owp-pool.example.com
+    description: Production server
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: Worker authentication token obtained from registration
+    AdminToken:
+      type: apiKey
+      in: header
+      name: X-Admin-Token
+      description: Administrative token for management operations
+
+  schemas:
+    # Core Enums
+    WorkerStatus:
+      type: string
+      enum: [idle, working, paused]
+      description: Current status of a worker
+
+    TaskStatus:
+      type: string
+      enum: [ready, leased, in_progress, blocked, pr_opened, merged]
+      description: Current status of a task
+
+    TrustTier:
+      type: string
+      enum: [untrusted, basic, trusted, maintainer]
+      description: Trust level for worker access control
+
+    # Worker Schemas
+    RegisterWorkerRequest:
+      type: object
+      required: [name, skills, capacity_points, max_concurrent_tasks]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: Human-readable worker name
+        github_handle:
+          type: string
+          maxLength: 120
+          nullable: true
+          description: GitHub username for attribution
+        skills:
+          type: array
+          items:
+            type: string
+          description: List of skills/technologies the worker can handle
+        capacity_points:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 5
+          description: Daily capacity in points
+        max_concurrent_tasks:
+          type: integer
+          minimum: 1
+          maximum: 20
+          default: 2
+          description: Maximum number of concurrent task assignments
+
+    RegisterWorkerResponse:
+      type: object
+      required: [worker_id, token]
+      properties:
+        worker_id:
+          type: string
+          description: Unique worker identifier
+        token:
+          type: string
+          description: Bearer token for authentication
+
+    HeartbeatRequest:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/WorkerStatus'
+          default: idle
+        note:
+          type: string
+          maxLength: 500
+          nullable: true
+          description: Optional status message
+
+    HeartbeatResponse:
+      type: object
+      required: [ok, server_time]
+      properties:
+        ok:
+          type: boolean
+          default: true
+        server_time:
+          type: string
+          format: date-time
+          description: Current server timestamp
+
+    # Task Schemas
+    TaskArtifact:
+      type: object
+      properties:
+        pr_url:
+          type: string
+          format: uri
+          nullable: true
+          description: GitHub PR URL
+        commit_sha:
+          type: string
+          nullable: true
+          description: Git commit SHA
+        patch_url:
+          type: string
+          format: uri
+          nullable: true
+          description: URL to patch file
+        extra:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: Additional artifact metadata
+
+    LeaseView:
+      type: object
+      required: [task_id, repo, title, estimate_points, priority, required_skills, lease_expires_at]
+      properties:
+        task_id:
+          type: string
+          description: Unique task identifier
+        repo:
+          type: string
+          description: Repository identifier
+        title:
+          type: string
+          description: Task title
+        description:
+          type: string
+          nullable: true
+          description: Detailed task description
+        estimate_points:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: Estimated effort in points
+        priority:
+          type: integer
+          minimum: 0
+          maximum: 1000
+          description: Task priority (higher = more important)
+        area:
+          type: string
+          maxLength: 120
+          nullable: true
+          description: Code area for conflict avoidance
+        tier:
+          type: integer
+          minimum: 0
+          maximum: 3
+          default: 0
+          description: Risk tier (0=safe, 3=high-risk)
+        required_skills:
+          type: array
+          items:
+            type: string
+          description: Required skills for this task
+        lease_expires_at:
+          type: string
+          format: date-time
+          description: When the lease expires
+
+    WorkResponse:
+      type: object
+      required: [worker_id, leases]
+      properties:
+        worker_id:
+          type: string
+          description: Worker identifier
+        leases:
+          type: array
+          items:
+            $ref: '#/components/schemas/LeaseView'
+          description: Assigned task leases
+
+    TaskStatusUpdateRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [in_progress, blocked, pr_opened, merged]
+          description: New task status
+        message:
+          type: string
+          maxLength: 4000
+          nullable: true
+          description: Optional status message
+        artifact:
+          $ref: '#/components/schemas/TaskArtifact'
+
+    # Admin Schemas
+    RepoCreateRequest:
+      type: object
+      required: [repo]
+      properties:
+        repo:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Repository key (e.g. 'demo' or 'owner/name')
+        max_open_prs:
+          type: integer
+          minimum: 0
+          maximum: 100
+          default: 3
+          description: Maximum open PRs (0 disables assignments)
+        area_locks_enabled:
+          type: boolean
+          default: true
+          description: Enable area-based conflict prevention
+
+    RepoCreateResponse:
+      type: object
+      required: [ok, repo]
+      properties:
+        ok:
+          type: boolean
+          default: true
+        repo:
+          type: string
+          description: Created repository identifier
+
+    TaskCreateRequest:
+      type: object
+      required: [repo, title]
+      properties:
+        repo:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Repository identifier
+        title:
+          type: string
+          minLength: 1
+          maxLength: 300
+          description: Task title
+        description:
+          type: string
+          nullable: true
+          description: Detailed task description
+        estimate_points:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 1
+          description: Estimated effort in points
+        priority:
+          type: integer
+          minimum: 0
+          maximum: 1000
+          default: 10
+          description: Task priority (higher = more important)
+        required_skills:
+          type: array
+          items:
+            type: string
+          description: Required skills for this task
+        area:
+          type: string
+          maxLength: 120
+          nullable: true
+          description: Code area for conflict avoidance
+        tier:
+          type: integer
+          minimum: 0
+          maximum: 3
+          default: 0
+          description: Risk tier (0=safe, 3=high-risk)
+
+    TaskCreateResponse:
+      type: object
+      required: [ok, task_id]
+      properties:
+        ok:
+          type: boolean
+          default: true
+        task_id:
+          type: string
+          description: Created task identifier
+
+    # Advanced Feature Schemas
+    WorkerReputation:
+      type: object
+      required: [worker_id, reputation_score, trust_tier, metrics]
+      properties:
+        worker_id:
+          type: string
+          description: Worker identifier
+        reputation_score:
+          type: number
+          minimum: 0
+          maximum: 100
+          description: Overall reputation score (0-100)
+        trust_tier:
+          $ref: '#/components/schemas/TrustTier'
+        metrics:
+          type: object
+          required: [completion_rate, avg_pr_quality, on_time_delivery, total_tasks]
+          properties:
+            completion_rate:
+              type: number
+              minimum: 0
+              maximum: 1
+              description: Percentage of tasks completed successfully
+            avg_pr_quality:
+              type: number
+              minimum: 0
+              maximum: 5
+              description: Average PR quality rating
+            on_time_delivery:
+              type: number
+              minimum: 0
+              maximum: 1
+              description: Percentage of tasks completed on time
+            total_tasks:
+              type: integer
+              minimum: 0
+              description: Total number of tasks completed
+
+    TrustTierUpdateRequest:
+      type: object
+      required: [tier]
+      properties:
+        tier:
+          $ref: '#/components/schemas/TrustTier'
+        reason:
+          type: string
+          maxLength: 500
+          description: Reason for trust tier change
+
+    AnalyticsMetrics:
+      type: object
+      required: [repo, period, metrics]
+      properties:
+        repo:
+          type: string
+          description: Repository identifier
+        period:
+          type: string
+          description: Time period for metrics
+        metrics:
+          type: object
+          required: [tasks_completed, avg_completion_time, worker_utilization, pr_merge_rate]
+          properties:
+            tasks_completed:
+              type: integer
+              minimum: 0
+              description: Number of tasks completed in period
+            avg_completion_time:
+              type: string
+              description: Average time to complete tasks
+            worker_utilization:
+              type: number
+              minimum: 0
+              maximum: 1
+              description: Worker capacity utilization rate
+            pr_merge_rate:
+              type: number
+              minimum: 0
+              maximum: 1
+              description: Percentage of PRs that get merged
+            bottlenecks:
+              type: array
+              items:
+                type: string
+              description: Identified system bottlenecks
+
+    AuditEvent:
+      type: object
+      required: [timestamp, event_type, actor, target]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          description: When the event occurred
+        event_type:
+          type: string
+          enum: [task_assigned, task_completed, worker_registered, repo_created, trust_tier_changed]
+          description: Type of audit event
+        actor:
+          type: string
+          description: Who performed the action (worker_id, admin, system)
+        target:
+          type: string
+          description: What was affected (task_id, worker_id, repo)
+        details:
+          type: object
+          additionalProperties: true
+          description: Additional event context
+
+    GitHubSyncRequest:
+      type: object
+      required: [sync_type]
+      properties:
+        sync_type:
+          type: string
+          enum: [read_only, bidirectional]
+          description: Type of GitHub synchronization
+        write_permissions:
+          type: array
+          items:
+            type: string
+            enum: [comments, labels, status]
+          description: Requested write permissions
+
+    GitHubSyncResponse:
+      type: object
+      required: [webhook_url, permissions_granted]
+      properties:
+        webhook_url:
+          type: string
+          format: uri
+          description: Webhook URL for GitHub integration
+        permissions_granted:
+          type: array
+          items:
+            type: string
+          description: Granted GitHub permissions
+
+    # Error Response
+    ErrorResponse:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          description: Error code identifier
+        message:
+          type: string
+          description: Human-readable error message
+        details:
+          type: object
+          description: Additional error context
+          additionalProperties: true
+
+paths:
+  /v1/workers/register:
+    post:
+      summary: Register a new worker
+      description: Register a worker with skills and capacity to receive task assignments
+      operationId: registerWorker
+      tags: [Workers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterWorkerRequest'
+      responses:
+        '201':
+          description: Worker registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterWorkerResponse'
+        '400':
+          description: Invalid request data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/workers/heartbeat:
+    post:
+      summary: Send worker heartbeat
+      description: Update worker status and maintain lease validity
+      operationId: workerHeartbeat
+      tags: [Workers]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HeartbeatRequest'
+      responses:
+        '200':
+          description: Heartbeat received successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HeartbeatResponse'
+        '401':
+          description: Invalid or missing authentication token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/work:
+    get:
+      summary: Fetch available work
+      description: Get task assignments based on worker skills and capacity
+      operationId: fetchWork
+      tags: [Workers]
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Available work assignments
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkResponse'
+        '401':
+          description: Invalid or missing authentication token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/tasks/{task_id}/status:
+    post:
+      summary: Update task status
+      description: Update the status of an assigned task with optional artifacts
+      operationId: updateTaskStatus
+      tags: [Tasks]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Task identifier
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskStatusUpdateRequest'
+      responses:
+        '200':
+          description: Task status updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    default: true
+        '400':
+          description: Invalid request data or task state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Invalid or missing authentication token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Not authorized to update this task
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/admin/repos:
+    post:
+      summary: Create or configure repository
+      description: Register a repository with capacity limits and configuration
+      operationId: createRepo
+      tags: [Admin]
+      security:
+        - AdminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RepoCreateRequest'
+      responses:
+        '201':
+          description: Repository created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepoCreateResponse'
+        '400':
+          description: Invalid request data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Invalid or missing admin token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/admin/tasks:
+    post:
+      summary: Create a new task
+      description: Create a task for worker assignment
+      operationId: createTask
+      tags: [Admin]
+      security:
+        - AdminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskCreateRequest'
+      responses:
+        '201':
+          description: Task created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskCreateResponse'
+        '400':
+          description: Invalid request data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Invalid or missing admin token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/admin/state:
+    get:
+      summary: Get system state
+      description: Retrieve current system status and metrics
+      operationId: getSystemState
+      tags: [Admin]
+      security:
+        - AdminToken: []
+      responses:
+        '200':
+          description: System state retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  workers_online:
+                    type: integer
+                    description: Number of active workers
+                  tasks_queued:
+                    type: integer
+                    description: Number of tasks waiting for assignment
+                  tasks_in_progress:
+                    type: integer
+                    description: Number of tasks currently being worked on
+                  repositories:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        repo:
+                          type: string
+                        max_open_prs:
+                          type: integer
+                        current_open_prs:
+                          type: integer
+        '401':
+          description: Invalid or missing admin token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/workers/{worker_id}/reputation:
+    get:
+      summary: Get worker reputation
+      description: Retrieve reputation score and metrics for a worker
+      operationId: getWorkerReputation
+      tags: [Reputation]
+      security:
+        - AdminToken: []
+      parameters:
+        - name: worker_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Worker identifier
+      responses:
+        '200':
+          description: Worker reputation retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkerReputation'
+        '401':
+          description: Invalid or missing admin token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Worker not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/workers/{worker_id}/trust-tier:
+    post:
+      summary: Update worker trust tier
+      description: Change the trust tier for a worker
+      operationId: updateWorkerTrustTier
+      tags: [Reputation]
+      security:
+        - AdminToken: []
+      parameters:
+        - name: worker_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Worker identifier
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrustTierUpdateRequest'
+      responses:
+        '200':
+          description: Trust tier updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    default: true
+        '400':
+          description: Invalid request data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Invalid or missing admin token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Worker not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/analytics/repositories/{repo}:
+    get:
+      summary: Get repository analytics
+      description: Retrieve performance metrics for a repository
+      operationId: getRepositoryAnalytics
+      tags: [Analytics]
+      security:
+        - AdminToken: []
+      parameters:
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Repository identifier
+        - name: period
+          in: query
+          schema:
+            type: string
+            enum: [last_7_days, last_30_days, last_90_days]
+            default: last_30_days
+          description: Time period for analytics
+      responses:
+        '200':
+          description: Repository analytics retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalyticsMetrics'
+        '401':
+          description: Invalid or missing admin token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Repository not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/audit/events:
+    get:
+      summary: Get audit events
+      description: Retrieve audit log events with optional filtering
+      operationId: getAuditEvents
+      tags: [Audit]
+      security:
+        - AdminToken: []
+      parameters:
+        - name: event_type
+          in: query
+          schema:
+            type: string
+          description: Filter by event type
+        - name: actor
+          in: query
+          schema:
+            type: string
+          description: Filter by actor
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+          description: Maximum number of events to return
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: Number of events to skip
+      responses:
+        '200':
+          description: Audit events retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AuditEvent'
+                  total:
+                    type: integer
+                    description: Total number of events matching filter
+        '401':
+          description: Invalid or missing admin token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/github/repos/{owner}/{repo}/sync:
+    post:
+      summary: Configure GitHub integration
+      description: Set up bidirectional synchronization with GitHub repository
+      operationId: configureGitHubSync
+      tags: [GitHub]
+      security:
+        - AdminToken: []
+      parameters:
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+          description: GitHub repository owner
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+          description: GitHub repository name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GitHubSyncRequest'
+      responses:
+        '200':
+          description: GitHub integration configured successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitHubSyncResponse'
+        '400':
+          description: Invalid request data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Invalid or missing admin token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
