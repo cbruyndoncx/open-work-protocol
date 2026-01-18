@@ -1,0 +1,9 @@
+.venv/
+.uv-cache/
+__pycache__/
+*.pyc
+*.db
+.env
+.env.local
+env.local
+secrets.env

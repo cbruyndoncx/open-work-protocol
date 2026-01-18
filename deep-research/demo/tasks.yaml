@@ -1,0 +1,47 @@
+- title: "Docs: Add quickstart to README"
+  description: "Add a concise quickstart section and a 60-second demo script."
+  estimate_points: 1
+  priority: 50
+  required_skills: ["docs"]
+  area: "docs"
+  tier: 0
+
+- title: "Tests: Add minimal scheduler cycle test"
+  description: "Create a small test that asserts leases requeue after TTL and area locks prevent collisions."
+  estimate_points: 2
+  priority: 60
+  required_skills: ["python"]
+  area: "scheduler"
+  tier: 0
+
+- title: "UX: Add 'max_open_prs' throttle indicator to dashboard"
+  description: "Show open PR count per repo and highlight when scheduling is throttled."
+  estimate_points: 1
+  priority: 40
+  required_skills: ["python"]
+  area: "dashboard"
+  tier: 0
+
+- title: "Integration: Add GitHub Issues task source (demo stub)"
+  description: "Poll issues with label 'pool:ready' and mirror them into the local task DB."
+  estimate_points: 3
+  priority: 30
+  required_skills: ["python"]
+  area: "github"
+  tier: 1
+
+- title: "Chore: Add worker 'pause' mode"
+  description: "Allow workers to temporarily stop receiving new leases without unregistering."
+  estimate_points: 1
+  priority: 20
+  required_skills: ["python"]
+  area: "worker"
+  tier: 0
+
+- title: "Docs: Add OWP v0.1 protocol examples"
+  description: "Add example curl commands for each endpoint."
+  estimate_points: 1
+  priority: 10
+  required_skills: ["docs"]
+  area: "docs"
+  tier: 0
